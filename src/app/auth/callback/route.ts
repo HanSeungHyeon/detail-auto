@@ -1,0 +1,23 @@
+import { NextRequest, NextResponse } from "next/server"
+import { createClient } from "@/utils/supabase/server"
+
+export async function GET(request: NextRequest) {
+  const { searchParams, origin } = new URL(request.url)
+  const code = searchParams.get("code")
+  
+  // URL to redirect to after sign in process completes
+  const next = searchParams.get("next") ?? "/dashboard"
+
+  if (code) {
+    const supabase = await createClient()
+    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    
+    if (!error) {
+      return NextResponse.redirect(`${origin}${next}`)
+    }
+  }
+
+  // Return the user to an error page with instructions
+  // Alternatively, just redirect to login with an error param
+  return NextResponse.redirect(`${origin}/login?error=auth-link-expired`)
+}

@@ -1,0 +1,79 @@
+
+> temp_next@0.1.0 build
+> next build
+
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of D:\hsh\package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * D:\hsh\auto-detail\package-lock.json
+
+▲ Next.js 16.1.6 (Turbopack)
+
+  Creating an optimized production build ...
+Found 5 warnings while optimizing generated CSS:
+
+Issue #1:
+[2m│   .focus-visible\:border-ring {[22m
+[2m│     &:focus-visible {[22m
+[2m│[22m       border-color: var(-- ring);
+[2m┆[22m                           [33m[2m^--[22m Unexpected token Ident("ring")[39m
+[2m┆[22m
+[2m│     }[22m
+[2m│   }[22m
+
+Issue #2:
+[2m│       --tw-ring-color: var(-- ring);[22m
+[2m│       @supports (color: color-mix(in lab, red, red)) {[22m
+[2m│[22m         --tw-ring-color: color-mix(in oklab, var(-- ring) 50%, transparent);
+[2m┆[22m                                                    [33m[2m^--[22m Unexpected token Ident("ring")[39m
+[2m┆[22m
+[2m│       }[22m
+[2m│     }[22m
+
+Issue #3:
+[2m│   .focus-visible\:ring-ring\/50 {[22m
+[2m│     &:focus-visible {[22m
+[2m│[22m       --tw-ring-color: var(-- ring);
+[2m┆[22m                              [33m[2m^--[22m Unexpected token Ident("ring")[39m
+[2m┆[22m
+[2m│       @supports (color: color-mix(in lab, red, red)) {[22m
+[2m│         --tw-ring-color: color-mix(in oklab, var(-- ring) 50%, transparent);[22m
+
+Issue #4:
+[2m│     outline-color: var(-- ring);[22m
+[2m│     @supports (color: color-mix(in lab, red, red)) {[22m
+[2m│[22m       outline-color: color-mix(in oklab, var(-- ring) 50%, transparent);
+[2m┆[22m                                                [33m[2m^--[22m Unexpected token Ident("ring")[39m
+[2m┆[22m
+[2m│     }[22m
+[2m│   }[22m
+
+Issue #5:
+[2m│   * {[22m
+[2m│     border-color: var(--border);[22m
+[2m│[22m     outline-color: var(-- ring);
+[2m┆[22m                          [33m[2m^--[22m Unexpected token Ident("ring")[39m
+[2m┆[22m
+[2m│     @supports (color: color-mix(in lab, red, red)) {[22m
+[2m│       outline-color: color-mix(in oklab, var(-- ring) 50%, transparent);[22m
+
+✓ Compiled successfully in 2.8s
+  Running TypeScript ...
+  Collecting page data using 17 workers ...
+  Generating static pages using 17 workers (0/5) ...
+  Generating static pages using 17 workers (1/5) 
+  Generating static pages using 17 workers (2/5) 
+  Generating static pages using 17 workers (3/5) 
+✓ Generating static pages using 17 workers (5/5) in 566.0ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+└ ○ /create
+
+
+○  (Static)  prerendered as static content
+
