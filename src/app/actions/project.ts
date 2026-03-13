@@ -1,269 +1,256 @@
-"use server"
+"use server";
 
-import { revalidatePath } from "next/cache"
-import { createClient } from "@/utils/supabase/server"
-import { Json } from "@/types/supabase"
-import { generateLongFormContent } from "@/utils/gemini"
+import { GoogleGenAI } from "@google/genai";
+import { revalidatePath } from "next/cache";
+import { createClient } from "@/utils/supabase/server";
+import { generateLongFormContent } from "@/utils/gemini";
 
-// 지연 함수
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const NANO_BANANA_MODEL = "gemini-2.0-flash-exp";
+
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * 외부 이미지 URL을 가져와 Supabase Storage에 저장하고 공용 URL을 반환합니다.
+ * Nano Banana 이미지 생성
+ * 최대 3회 재시도, 지수 백오프 적용
  */
-async function saveExternalImageToSupabase(url: string, userId: string, supabase: any, retryCount = 0) {
-  try {
-    const urlObj = new URL(url);
-    const pathParts = urlObj.pathname.split('/');
-    let originalPrompt = decodeURIComponent(pathParts[pathParts.length - 1]).trim();
-    
-    // 특수문자 제거 및 공백 정제 (URL 안정성)
-    const cleanPrompt = originalPrompt.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, " ").replace(/\s{2,}/g, " ").trim();
-    
-    // 타겟 URL 생성 (Pollinations 기준)
-    let targetUrl = url;
-    if (url.includes("pollinations.ai")) {
-      urlObj.pathname = pathParts.slice(0, -1).join('/') + '/' + encodeURIComponent(cleanPrompt);
-      targetUrl = urlObj.toString().replace('%20%3F', '?'); // 공백+물음표 방지
-    }
+async function generateNanoBananaImage(
+  prompt: string,
+  retryCount = 0
+): Promise<string> {
+  const MAX_RETRIES = 3;
 
-    const response = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  try {
+    console.log(
+      `🎨 [${retryCount + 1}/${MAX_RETRIES + 1}] Nano Banana 이미지 생성 중...`
+    );
+
+    const response = await ai.models.generateContent({
+      model: NANO_BANANA_MODEL,
+      contents: prompt,
+      config: {
+        responseModalities: ["IMAGE", "TEXT"],
       },
-      next: { revalidate: 0 } 
     });
 
-    if (!response.ok) {
-      if ((response.status >= 500 || response.status === 429) && retryCount < 1) {
-        // 서버 에러나 Too Many Requests 시 단 1회만 짧게 재시도 (에러 로그 없이 진행)
-        await sleep(2000);
-        return saveExternalImageToSupabase(url, userId, supabase, retryCount + 1);
+    const parts = response?.candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+      if (part?.inlineData?.data) {
+        const mimeType = part.inlineData.mimeType || "image/png";
+        console.log(`✅ 이미지 생성 성공 (${mimeType})`);
+        return `data:${mimeType};base64,${part.inlineData.data}`;
       }
-      
-      // Fallback 처리 트리거 (콘솔 에러 없음)
-      throw new Error("FallbackTrigger");
     }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const fileName = `${userId}/ai-${Math.random().toString(36).substring(7)}.jpg`;
-    
-    const { error } = await supabase.storage
-      .from("project_images")
-      .upload(fileName, buffer, { contentType: 'image/jpeg', upsert: true });
 
-    if (error) throw new Error("FallbackTrigger");
-    
-    const { data: urlData } = supabase.storage.from("project_images").getPublicUrl(fileName);
-    return urlData.publicUrl;
-    
-  } catch (err) {
-    // 에러를 콘솔에 출력하지 않고 조용히 Fallback 이미지로 대체합니다. (유저 에러 노출 방지)
-    const randomSeed = Math.floor(Math.random() * 1000);
-    return `https://picsum.photos/seed/${randomSeed}/1200/800`;
+    throw new Error("응답에 이미지 데이터 없음");
+  } catch (err: any) {
+    const msg = err?.message || "Unknown error";
+    console.error(`❌ Nano Banana 에러: ${msg}`);
+
+    if (retryCount < MAX_RETRIES) {
+      const backoffMs = Math.pow(2, retryCount + 1) * 2000;
+      console.log(`⏳ ${backoffMs / 1000}초 후 재시도...`);
+      await sleep(backoffMs);
+      return generateNanoBananaImage(prompt, retryCount + 1);
+    }
+
+    throw new Error(`이미지 생성 실패 (${MAX_RETRIES + 1}회 시도): ${msg}`);
   }
 }
 
-export async function uploadImage(formData: FormData) {
-  const file = formData.get("file") as File
-  if (!file) {
-    return { error: "No file provided" }
+/**
+ * 모든 섹션 이미지를 Nano Banana로 순차 생성
+ */
+async function generateAllSectionImages(
+  sections: Record<string, any>
+): Promise<void> {
+  const sectionKeys = Object.keys(sections);
+
+  console.log(`🚀 ${sectionKeys.length}개 섹션 이미지 생성 시작...`);
+
+  for (let i = 0; i < sectionKeys.length; i++) {
+    const key = sectionKeys[i];
+    const prompt = sections[key]?.imagePrompt;
+
+    console.log(`\n[${i + 1}/${sectionKeys.length}] ${key}`);
+
+    if (!prompt || typeof prompt !== "string") {
+      console.warn(`⚠️ imagePrompt 없음: "${key}"`);
+      sections[key].image = "";
+      continue;
+    }
+
+    try {
+      sections[key].image = await generateNanoBananaImage(prompt);
+    } catch (err: any) {
+      console.error(`⚠️ "${key}" 실패: ${err.message}`);
+      sections[key].image = "";
+    }
+
+    // rate limit 방지 3초 대기
+    if (i < sectionKeys.length - 1) {
+      console.log("⏳ 3초 대기...");
+      await sleep(3000);
+    }
   }
 
-  if (file.size > 10 * 1024 * 1024) {
-    return { error: "업로드 가능한 최대 용량은 10MB입니다. 더 가벼운 이미지를 사용해 주세요." }
-  }
-
-  const supabase = await createClient()
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { error: "Unauthorized" }
-  }
-
-  // Upload to Supabase Storage Bucket 'project_images'
-  const fileExt = file.name.split('.').pop()
-  const fileName = `${user.id}/${Math.random()}.${fileExt}`
-
-  const { data, error } = await supabase.storage
-    .from("project_images")
-    .upload(fileName, file)
-
-  if (error) {
-    return { error: error.message }
-  }
-
-  const { data: urlData } = supabase.storage
-    .from("project_images")
-    .getPublicUrl(fileName)
-
-  return { success: true, url: urlData.publicUrl }
+  console.log(`\n✅ 이미지 생성 완료`);
 }
 
 export async function createProject(formData: FormData) {
-  const title = formData.get("title")?.toString()
-  const audience = formData.get("audience")?.toString()
-  const thumbnailUrl = formData.get("thumbnailUrl")?.toString()
-  
+  const title = formData.get("title")?.toString();
+  const audience = formData.get("audience")?.toString();
+  const price = formData.get("price")?.toString();
+  const discountRate = formData.get("discountRate")?.toString();
+
   if (!title || !audience) {
-    return { error: "필수 입력 항목이 누락되었습니다." }
+    return { error: "필수 입력 항목이 누락되었습니다." };
   }
 
-  const supabase = await createClient()
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
 
   if (userError || !user) {
-    return { error: "Unauthorized" }
+    return { error: "Unauthorized" };
   }
 
-  // 1. Generate Content via Gemini AI
+  // 1. 텍스트 생성 (Groq)
   let aiContent;
   try {
-    aiContent = await generateLongFormContent(title, audience, formData.get("features")?.toString());
+    aiContent = await generateLongFormContent(
+      title,
+      audience,
+      formData.get("features")?.toString(),
+      price,
+      discountRate
+    );
   } catch (err) {
-    console.error("Gemini Error:", err);
+    console.error("텍스트 생성 에러:", err);
     return { error: "AI 콘텐츠 생성 중 오류가 발생했습니다." };
   }
 
-  // 2. 외부 이미지들을 Supabase로 영구 저장 (순차 처리하여 차단 방지)
-  console.log("Saving AI images to Supabase storage with delay...");
-  
-  // Pollinations.ai는 프롬프트를 직접 이미지로 변환해주는 서비스입니다.
-  const getAiImageUrl = (prompt: string, width = 1200, height = 800) => 
-    `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random() * 100000)}`;
-
-  const problemImageUrl = await saveExternalImageToSupabase(
-    getAiImageUrl(aiContent.problem.imagePrompt),
-    user.id,
-    supabase
-  );
-  await sleep(2000); // 넉넉하게 2초 대기
-
-  const aiCuts = [];
-  for (const prompt of aiContent.nanoBanana.imagePrompts) {
-    const url = await saveExternalImageToSupabase(
-      getAiImageUrl(prompt, 800, 1000),
-      user.id,
-      supabase
-    );
-    aiCuts.push(url);
-    await sleep(2000);
-  }
-
-  const solutionDetails = [];
-  for (const d of aiContent.solution.details) {
-    const url = await saveExternalImageToSupabase(
-      getAiImageUrl(d.imagePrompt),
-      user.id,
-      supabase
-    );
-    solutionDetails.push({
-      title: d.title,
-      desc: d.desc,
-      image: url
-    });
-    await sleep(2000);
-  }
-
-  const longForm = {
-    heroImage: thumbnailUrl,
+  // 2. 텍스트만 먼저 DB 저장
+  const longFormWithoutImages = {
     subtitle: aiContent.subtitle,
-    problem: {
-      title: aiContent.problem.title,
-      desc: aiContent.problem.desc,
-      image: problemImageUrl
-    },
-    nanoBanana: {
-      title: aiContent.nanoBanana.title,
-      desc: aiContent.nanoBanana.desc,
-      cuts: aiCuts
-    },
-    solution: {
-      title: aiContent.solution.title,
-      desc: aiContent.solution.desc,
-      stats: aiContent.solution.stats,
-      details: solutionDetails
-    },
-    socialProof: aiContent.socialProof
-  }
+    sections: Object.fromEntries(
+      Object.entries(aiContent.sections).map(([key, val]: [string, any]) => [
+        key,
+        { ...val, image: "" },
+      ])
+    ),
+  };
 
-  // Insert into Supabase 'projects' table
-  const { data, error } = await (supabase
-    .from("projects") as any)
+  const { data, error } = await (supabase.from("projects") as any)
     .insert({
       user_id: user.id,
-      title: title,
+      title,
       target_audience: audience,
-      thumbnail_url: thumbnailUrl || null,
-      long_form: longForm,
-      status: 'completed'
+      thumbnail_url: "",
+      long_form: longFormWithoutImages,
+      status: "processing",
     })
     .select()
-    .single()
+    .single();
 
   if (error) {
-    return { error: error.message }
+    return { error: error.message };
   }
-  
-  revalidatePath("/dashboard")
-  return { success: true, projectId: data.id }
+
+  const projectId = data.id;
+
+  // 3. Nano Banana 이미지 생성
+  try {
+    await generateAllSectionImages(aiContent.sections);
+  } catch (err) {
+    console.error("이미지 생성 치명적 에러:", err);
+    await (supabase.from("projects") as any)
+      .update({ status: "failed" })
+      .eq("id", projectId);
+    return { error: "이미지 생성 중 오류가 발생했습니다." };
+  }
+
+  // 4. 최종 데이터로 DB 업데이트
+  const { error: updateError } = await (supabase.from("projects") as any)
+    .update({
+      thumbnail_url: aiContent.sections.hero?.image || "",
+      long_form: {
+        subtitle: aiContent.subtitle,
+        sections: aiContent.sections,
+      },
+      status: "completed",
+    })
+    .eq("id", projectId);
+
+  if (updateError) {
+    return { error: updateError.message };
+  }
+
+  revalidatePath("/dashboard");
+  return { success: true, projectId };
 }
 
 export async function fetchUserProjects() {
-  const supabase = await createClient()
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
 
   if (userError || !user) {
-    return { projects: [], error: "Unauthorized" }
+    return { projects: [], error: "Unauthorized" };
   }
 
   const { data: projects, error } = await supabase
     .from("projects")
     .select("*")
     .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending: false });
 
   if (error) {
-    return { projects: [], error: error.message }
+    return { projects: [], error: error.message };
   }
 
-  return { projects }
+  return { projects };
 }
 
 export async function createProjectFromSample(sampleId: string) {
-  const supabase = await createClient()
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
 
   if (userError || !user) {
-    return { error: "로그인이 필요합니다." }
+    return { error: "로그인이 필요합니다." };
   }
 
-  const { sampleProducts } = await import("@/data/samples")
-  const sample = sampleProducts.find(p => p.id === sampleId)
+  const { sampleProducts } = await import("@/data/samples");
+  const sample = sampleProducts.find((p) => p.id === sampleId);
 
   if (!sample) {
-    return { error: "샘플을 찾을 수 없습니다." }
+    return { error: "샘플을 찾을 수 없습니다." };
   }
 
-  // Create a new project based on the sample
-  const { data, error } = await (supabase
-    .from("projects") as any)
+  const { data, error } = await (supabase.from("projects") as any)
     .insert({
       user_id: user.id,
       title: `${sample.title} (사본)`,
       target_audience: sample.audience,
       thumbnail_url: sample.thumbnailUrl,
       long_form: sample.longForm,
-      status: 'completed'
+      status: "completed",
     })
     .select()
-    .single()
+    .single();
 
   if (error) {
-    return { error: error.message }
+    return { error: error.message };
   }
 
-  revalidatePath("/dashboard")
-  return { success: true, projectId: data.id }
+  revalidatePath("/dashboard");
+  return { success: true, projectId: data.id };
 }

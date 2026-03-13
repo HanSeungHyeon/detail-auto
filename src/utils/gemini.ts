@@ -1,10 +1,19 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const groq = new Groq({ apiKey: process.env.GROP_API_KEY || "" });
 
-export async function generateLongFormContent(productName: string, targetAudience: string, features?: string) {
-  console.log("Starting Optimized Gemini generation for:", productName);
-  const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+export async function generateLongFormContent(productName: string, targetAudience: string, features?: string, price?: string, discountRate?: string) {
+  console.log("Starting Groq LLM generation for:", productName);
+
+  // 할인가 계산
+  let discountedPrice = "";
+  if (price && discountRate) {
+    const numericPrice = parseInt(price.replace(/[^0-9]/g, ""));
+    const rate = parseInt(discountRate);
+    if (numericPrice && rate) {
+      discountedPrice = Math.round(numericPrice * (1 - rate / 100)).toLocaleString() + "원";
+    }
+  }
 
   const prompt = `
 당신은 대한민국 최고의 이커머스 상세페이지 기획자이자 카피라이터입니다. 
@@ -18,73 +27,80 @@ export async function generateLongFormContent(productName: string, targetAudienc
 3. **구체적 상황 묘사**: "힘들다", "불편하다" 대신 "매일 밤 12시까지 엑셀과 씨름하며 한숨 쉬던 그 시간들" 처럼 고객이 자신의 일상을 투영할 수 있도록 구체적으로 묘사하세요.
 
 ### 🖼️ [참조 가이드 2: AI 이미지 프롬프트 패턴 (gemini-prompt-patterns.md)]
-모든 이미지 프롬프트는 아래의 '이미지 생성 제약 사항'을 포함하여 영문으로 작성해야 합니다.
-1. **실사 사진 스타일 (Mandatory)**: 절대 일러스트나 카툰 스타일 금지. "Realistic Photography", "High-end Advertising Quality", "Natural Skin Texture", "Professional Lighting" 등의 키워드를 포함하세요.
-2. **비주얼 무드**: 'Minimal' 또는 'Premium' 스타일을 유지하며, 설화수/이니스프리 광고 같은 고품격 조명감과 선명도를 반영하세요.
-3. **너비 고정**: "1200px wide, full bleed, no margins" 등의 지시어를 프롬프트에 녹여내세요.
+모든 이미지 프롬프트는 아래의 기술적 제약 사항을 반드시 포함하여 영문으로 작성해야 합니다.
+1. **EXACT DIMENSIONS**: 1200x[HEIGHT] pixels (MUST be 1200px wide).
+2. **FULL BLEED**: NO margins or borders.
+3. **PHOTOGRAPHY STYLE**: REALISTIC PHOTOGRAPHY, Korean beauty advertising quality (Sulwhasoo, Innisfree vibe).
 
 ### 🍱 [참조 가이드 3: 13섹션 상세페이지 구조]
-전체 여정: [주목] → [공감] → [이해] → [희망] → [신뢰] → [확신] → [행동]
-이 구조에 맞춰 아래 JSON 항목을 채워주세요.
+성공하는 상세페이지의 13개 필수 섹션을 모두 포함해야 합니다.
+
+1. **Hero**: 주목 + 관심 (800px)
+2. **Pain**: 공감 + "이거 내 얘기다" (600px)
+3. **Problem**: 진짜 원인 파악 및 관점 전환 (500px)
+4. **Story**: Before -> After 변화의 희망 (700px)
+5. **Solution Intro**: 제품 정체성 명확화 (400px)
+6. **How It Works**: 쉬워 보이는 3-4단계 프로세스 (600px)
+7. **Social Proof**: 숫자와 후기로 증명 (800px)
+8. **Authority**: 제작자의 전문성과 진정성 (500px)
+9. **Benefits + Bonus**: 가치 극대화 (700px)
+10. **Risk Removal**: 환불 보장 및 FAQ (500px)
+11. **Final Comparison**: 제품이 있을 때와 없을 때의 극명한 대비 (400px)
+12. **Target Filter**: 추천 고객 vs 비추천 고객 (400px)
+13. **Final CTA**: 가격 혜택 및 즉각적 행동 유도 (600px)
 
 ---
 
 **[상품 정보]**
 - 상품명: ${productName}
 - 핵심 타겟: ${targetAudience}
-- 강조하고 싶은 점: ${features || "없음"}
+- 정가: ${price || "미입력 (AI가 적절한 가격 설정)"}
+- 할인율: ${discountRate ? discountRate + "%" : "미입력 (AI가 적절한 할인율 설정)"}
+- 할인가: ${discountedPrice || "AI가 자동으로 계산"}
+- 제품 장점/소구점: ${features || "없음 (AI가 상품명과 타겟 기반으로 창의적으로 도출)"}
 
 **[작성 제약 사항]**
 1. **금지어**: "나노바나나", "Nano Banana" 사용 절대 금지. 대신 "독보적 AI", "프리미엄 솔루션", "스마트 엔진" 등으로 표현하세요.
-2. **이미지 프롬프트**: 각 이미지에 대해 AI 이미지 생성기가 이해할 수 있는 '매우 구체적이고 예술적인 영문 프롬프트'를 생성하세요. 단순히 키워드 나열이 아닌, 구도와 조명이 포함된 문장형 프롬프트가 좋습니다.
+2. **이미지 프롬프트**: 각 이미지에 대해 '매우 구체적이고 예술적인 영문 프롬프트'를 생성하세요. 1200px 조건을 프롬프트에 녹여야 합니다.
+3. **가격 반영**: finalCTA 섹션의 price에는 "${price || "사용자가 설정할 정가"}"를, discountPrice에는 "${discountedPrice || "할인된 가격"}"을 반드시 사용하세요.
+4. **소구점 전체 반영**: 사용자가 입력한 모든 소구점을 benefits 섹션의 items에 빠짐없이 포함하세요.
 
 **[응답 JSON 형식]**
+모든 섹션에는 해당 섹션의 분위기를 담은 정교한 'imagePrompt'가 포함되어야 합니다.
 \`\`\`json
 {
   "subtitle": "타겟의 심장을 찌르는 메인 슬로건",
-  "problem": {
-    "title": "페인포인트 자극 헤드라인 (공감 유발)",
-    "desc": "구체적인 문제 상황 묘사 및 공감 멘트",
-    "imagePrompt": "Detailed English prompt for a realistic photo showing the problem/pain point situation"
-  },
-  "nanoBanana": {
-    "title": "AI 기술로 해결하는 혁신적 방법 (이해/희망)",
-    "desc": "기존 방식과는 다른 차별화된 기술력 설명",
-    "imagePrompts": [
-      "Prompt 1: Technology close-up / Premium vibe",
-      "Prompt 2: Result of the technology / High-end",
-      "Prompt 3: User experience / Minimal lifestyle",
-      "Prompt 4: Abstract technology flow / Blue tones"
-    ]
-  },
-  "solution": {
-    "title": "궁극적인 솔루션과 변화된 일상 (확신)",
-    "desc": "제품 사용 후 얻게 될 구체적 가치와 혜택",
-    "stats": [
-      { "label": "신뢰 지표 1", "value": "98%" },
-      { "label": "신뢰 지표 2", "value": "+240%" },
-      { "label": "신뢰 지표 3", "value": "TOP 1" }
-    ],
-    "details": [
-      {
-        "title": "디테일 가치 1",
-        "desc": "본질적인 기능이나 디자인의 우수성 상세 설명",
-        "imagePrompt": "Professional macro shot or product lifestyle photo prompt"
-      },
-      {
-        "title": "디테일 가치 2",
-        "desc": "사용자 편의성이나 내구성 등 상세 설명",
-        "imagePrompt": "Professional macro shot or product lifestyle photo prompt"
-      }
-    ]
-  },
-  "socialProof": {
-    "title": "수많은 사람들이 선택한 이유 (신뢰)",
-    "reviews": [
-      { "author": "김*지", "rating": 5, "content": "진정성 느껴지는 구어체 리뷰" },
-      { "author": "박*준", "rating": 5, "content": "진정성 느껴지는 구어체 리뷰" },
-      { "author": "최*우", "rating": 5, "content": "진정성 느껴지는 구어체 리뷰" }
-    ]
+  "sections": {
+    "hero": { "title": "...", "desc": "...", "imagePrompt": "..." },
+    "pain": { "title": "...", "desc": "...", "imagePrompt": "..." },
+    "problem": { "title": "...", "desc": "...", "imagePrompt": "..." },
+    "story": { "title": "...", "desc": "...", "imagePrompt": "..." },
+    "solutionIntro": { "title": "...", "desc": "...", "imagePrompt": "..." },
+    "howItWorks": { 
+      "title": "...", 
+      "desc": "...", 
+      "imagePrompt": "...",
+      "steps": [{ "title": "...", "desc": "..." }]
+    },
+    "socialProof": { 
+      "title": "...", 
+      "desc": "...", 
+      "imagePrompt": "...",
+      "stats": [{ "label": "...", "value": "..." }],
+      "reviews": [{ "author": "...", "rating": 5, "content": "..." }]
+    },
+    "authority": { "title": "...", "desc": "...", "imagePrompt": "..." },
+    "benefits": { 
+      "title": "...", 
+      "desc": "...", 
+      "imagePrompt": "...",
+      "items": ["사용자가 입력한 모든 소구점을 빠짐없이 포함"],
+      "bonuses": [{ "name": "...", "value": "..." }]
+    },
+    "riskRemoval": { "title": "...", "desc": "...", "imagePrompt": "...", "faqs": [{ "q": "...", "a": "..." }] },
+    "finalComparison": { "title": "...", "desc": "...", "imagePrompt": "...", "with": ["..."], "without": ["..."] },
+    "targetFilter": { "title": "...", "desc": "...", "imagePrompt": "...", "recommend": ["..."], "avoid": ["..."] },
+    "finalCTA": { "title": "...", "desc": "...", "imagePrompt": "...", "price": "정가", "discountPrice": "할인가" }
   }
 }
 \`\`\`
@@ -92,10 +108,16 @@ export async function generateLongFormContent(productName: string, targetAudienc
 오직 JSON만 출력하세요. 마크다운 기호 없이 순수한 JSON 텍스트만 출력하세요.
 `;
 
-  const result = await model.generateContent(prompt);
-  const response = await result.response;
-  const text = response.text();
-  
+  const chatCompletion = await groq.chat.completions.create({
+    messages: [{ role: "user", content: prompt }],
+    model: "llama-3.3-70b-versatile",
+    temperature: 0.7,
+    max_completion_tokens: 8192,
+  });
+
+  const text = chatCompletion.choices[0]?.message?.content || "";
+  console.log("Groq response received, parsing JSON...");
+
   try {
     const jsonStr = text.replace(/```json|```/g, "").trim();
     return JSON.parse(jsonStr);

@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useProjectStore } from "@/stores/use-project-store";
-import { ArrowLeft, CheckCircle2, Sparkles, CreditCard, ImagePlus } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Sparkles, CreditCard, ImagePlus, Plus, X } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { uploadImage, createProject } from "@/app/actions/project";
+import { createProject } from "@/app/actions/project";
 import { verifySession } from "@/app/actions/auth";
 
 export default function CreateDetailAutoPage() {
@@ -19,7 +19,9 @@ export default function CreateDetailAutoPage() {
   // Form State
   const [productName, setProductName] = useState("");
   const [targetAudience, setTargetAudience] = useState("");
-  const [features, setFeatures] = useState("");
+  const [price, setPrice] = useState("");
+  const [discountRate, setDiscountRate] = useState("");
+  const [featureList, setFeatureList] = useState<string[]>([""]);
   
   // File Upload State
   const [file, setFile] = useState<File | null>(null);
@@ -96,6 +98,28 @@ export default function CreateDetailAutoPage() {
     if (currentStep === "upload" && file) setStep("form");
   };
 
+  // Feature list handlers
+  const addFeature = () => {
+    setFeatureList([...featureList, ""]);
+  };
+  const removeFeature = (index: number) => {
+    if (featureList.length <= 1) return;
+    setFeatureList(featureList.filter((_, i) => i !== index));
+  };
+  const updateFeature = (index: number, value: string) => {
+    const updated = [...featureList];
+    updated[index] = value;
+    setFeatureList(updated);
+  };
+
+  // 할인가 자동 계산
+  const calcDiscountedPrice = () => {
+    const p = parseInt(price.replace(/[^0-9]/g, ""));
+    const d = parseInt(discountRate);
+    if (!p || !d) return "";
+    return Math.round(p * (1 - d / 100)).toLocaleString() + "원";
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return;
@@ -104,46 +128,38 @@ export default function CreateDetailAutoPage() {
     setGenerating(true);
     
     try {
-      // 1. Upload Image
-      const uploadFormData = new FormData();
-      uploadFormData.append("file", file);
-      const uploadRes = await uploadImage(uploadFormData);
-      
-      let finalImageUrl = "";
-      if (uploadRes.success && uploadRes.url) {
-        finalImageUrl = uploadRes.url;
-      } else {
-        console.error("Upload failed", uploadRes.error);
-        alert(`이미지 업로드 실패: ${uploadRes.error}`);
-        setGenerating(false);
-        return;
-      }
-
-      // 2. Create Project
       const projectFormData = new FormData();
       projectFormData.append("title", productName);
       projectFormData.append("audience", targetAudience);
-      projectFormData.append("thumbnailUrl", finalImageUrl);
+      projectFormData.append("price", price);
+      projectFormData.append("discountRate", discountRate);
+      // 비어있지 않은 소구점만 전달
+      const validFeatures = featureList.filter(f => f.trim() !== "");
+      projectFormData.append("features", validFeatures.join("\n"));
       
       const createRes = await createProject(projectFormData);
       
       if (createRes.success && createRes.projectId) {
         setGenerating(false);
-        setStep("upload"); // reset
+        setStep("upload"); 
         setFile(null);
         setPreviewUrl(null);
         setProductName("");
         setTargetAudience("");
-        setFeatures("");
+        setPrice("");
+        setDiscountRate("");
+        setFeatureList([""]);
         router.push(`/project/${createRes.projectId}`);
       } else {
         alert(`프로젝트 생성 실패: ${createRes.error}`);
         setGenerating(false);
+        setStep("form");
       }
     } catch (err) {
       console.error(err);
       alert("생성 중 오류가 발생했습니다.");
       setGenerating(false);
+      setStep("form");
     }
   };
 
@@ -253,12 +269,13 @@ export default function CreateDetailAutoPage() {
         {/* Step 2: Form */}
         {currentStep === "form" && (
           <form onSubmit={handleSubmit} className="space-y-6 animate-in slide-in-from-right-8 duration-300">
+            {/* 기본 정보 카드 */}
             <section className="bg-card border border-border shadow-[0_2px_10px_rgba(0,0,0,0.02)] rounded-[24px] p-8">
-              <h2 className="text-xl font-bold text-card-foreground mb-6">상세페이지에 들어갈 내용을 알려주세요</h2>
+              <h2 className="text-xl font-bold text-card-foreground mb-6">기본 정보</h2>
               
               <div className="space-y-6">
                 <div>
-                  <label className="block text-[15px] font-semibold mb-2 text-[#333D4B] dark:text-foreground">상품명</label>
+                  <label className="block text-[15px] font-semibold mb-2 text-[#333D4B] dark:text-foreground">제품명 <span className="text-destructive">*</span></label>
                   <input
                     type="text"
                     required
@@ -269,7 +286,7 @@ export default function CreateDetailAutoPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[15px] font-semibold mb-2 text-[#333D4B] dark:text-foreground">핵심 타겟 고객</label>
+                  <label className="block text-[15px] font-semibold mb-2 text-[#333D4B] dark:text-foreground">핵심 타겟 고객 <span className="text-destructive">*</span></label>
                   <input
                     type="text"
                     required
@@ -279,20 +296,98 @@ export default function CreateDetailAutoPage() {
                     onChange={(e) => setTargetAudience(e.target.value)}
                   />
                 </div>
+              </div>
+            </section>
+
+            {/* 가격 정보 카드 */}
+            <section className="bg-card border border-border shadow-[0_2px_10px_rgba(0,0,0,0.02)] rounded-[24px] p-8">
+              <h2 className="text-xl font-bold text-card-foreground mb-6">가격 정보</h2>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-[15px] font-semibold text-[#333D4B] dark:text-foreground">가장 강조하고 싶은 소구점 3가지</label>
-                    <span className="text-[12px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">선택사항</span>
-                  </div>
-                  <textarea
-                    rows={4}
-                    placeholder="1. 메모리폼 소재로 목을 탄탄하게 지지&#10;2. 통기성이 뛰어나 쾌적함&#10;3. 세탁이 간편한 분리형 커버"
-                    className="w-full p-5 rounded-[16px] border-none bg-[#F2F4F6] dark:bg-background text-[16px] text-[#191F28] dark:text-foreground placeholder:text-[#8B95A1] focus:outline-none focus:ring-2 focus:ring-primary focus:bg-white dark:focus:bg-card transition-all resize-none leading-relaxed"
-                    value={features}
-                    onChange={(e) => setFeatures(e.target.value)}
+                  <label className="block text-[15px] font-semibold mb-2 text-[#333D4B] dark:text-foreground">정가</label>
+                  <input
+                    type="text"
+                    placeholder="예) 59,000원"
+                    className="w-full h-14 px-5 rounded-[16px] border-none bg-[#F2F4F6] dark:bg-background text-[16px] text-[#191F28] dark:text-foreground placeholder:text-[#8B95A1] focus:outline-none focus:ring-2 focus:ring-primary focus:bg-white dark:focus:bg-card transition-all"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
                   />
                 </div>
+                <div>
+                  <label className="block text-[15px] font-semibold mb-2 text-[#333D4B] dark:text-foreground">할인율</label>
+                  <input
+                    type="text"
+                    placeholder="예) 30"
+                    className="w-full h-14 px-5 rounded-[16px] border-none bg-[#F2F4F6] dark:bg-background text-[16px] text-[#191F28] dark:text-foreground placeholder:text-[#8B95A1] focus:outline-none focus:ring-2 focus:ring-primary focus:bg-white dark:focus:bg-card transition-all"
+                    value={discountRate}
+                    onChange={(e) => setDiscountRate(e.target.value.replace(/[^0-9]/g, ""))}
+                  />
+                  <p className="text-[12px] text-muted-foreground mt-1 px-1">숫자만 입력 (예: 30 → 30% 할인)</p>
+                </div>
               </div>
+
+              {/* 할인가 미리보기 */}
+              {price && discountRate && calcDiscountedPrice() && (
+                <div className="mt-4 p-4 rounded-[16px] bg-primary/5 border border-primary/10 flex items-center justify-between animate-in fade-in duration-200">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-muted-foreground line-through">{price}</span>
+                    <span className="text-[13px] font-black text-white bg-destructive px-2 py-0.5 rounded-full">{discountRate}% OFF</span>
+                  </div>
+                  <span className="text-xl font-black text-primary">{calcDiscountedPrice()}</span>
+                </div>
+              )}
+            </section>
+
+            {/* 장점 / 소구점 카드 */}
+            <section className="bg-card border border-border shadow-[0_2px_10px_rgba(0,0,0,0.02)] rounded-[24px] p-8">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-card-foreground">제품의 장점</h2>
+                  <p className="text-[13px] text-muted-foreground mt-1">강조하고 싶은 소구점을 자유롭게 추가하세요</p>
+                </div>
+                <span className="text-[12px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">선택사항</span>
+              </div>
+
+              <div className="space-y-3">
+                {featureList.map((feature, index) => (
+                  <div key={index} className="flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[13px] font-black shrink-0">
+                      {index + 1}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder={
+                        index === 0 ? "예) 메모리폼 소재로 목을 탄탄하게 지지" :
+                        index === 1 ? "예) 통기성이 뛰어나 쾌적함" :
+                        index === 2 ? "예) 세탁이 간편한 분리형 커버" :
+                        `소구점 ${index + 1}을 입력하세요`
+                      }
+                      className="flex-1 h-12 px-4 rounded-[12px] border-none bg-[#F2F4F6] dark:bg-background text-[15px] text-[#191F28] dark:text-foreground placeholder:text-[#8B95A1] focus:outline-none focus:ring-2 focus:ring-primary focus:bg-white dark:focus:bg-card transition-all"
+                      value={feature}
+                      onChange={(e) => updateFeature(index, e.target.value)}
+                    />
+                    {featureList.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeFeature(index)}
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all shrink-0"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={addFeature}
+                className="w-full mt-4 h-12 rounded-[12px] border-2 border-dashed border-border hover:border-primary/50 text-muted-foreground hover:text-primary flex items-center justify-center gap-2 text-[14px] font-semibold transition-all hover:bg-primary/5"
+              >
+                <Plus className="w-4 h-4" />
+                소구점 추가
+              </button>
             </section>
 
             <div className="flex gap-3">
