@@ -1,65 +1,63 @@
 "use server";
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@/lib/supabase/server";
 
-// 1. SDK 초기화 (표준 라이브러리 권장)
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const STABILITY_API_KEY = process.env.STABILITY_API_KEY || "";
+const STABILITY_MODEL = "sd3.5-large-turbo"; // "sd3.5-large" 또는 "sd3.5-large-turbo"
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * [핵심] 나노 바나나 이미지 생성 함수
- * - 429 에러(결제 한도 초과) 발생 시 즉시 프로세스 종료
+ * [핵심] Stability AI 이미지 생성 함수
+ * - 결제 한도 초과/인증 오류 발생 시 즉시 프로세스 종료
  * - 이미지 데이터가 없을 경우 예외 처리 강화
  */
-async function generateNanoBananaImage(prompt: string, retryCount = 0): Promise<string> {
+async function generateStabilityImage(prompt: string, retryCount = 0): Promise<string> {
   const MAX_RETRIES = 2; // 비용 절감을 위해 재시도 횟수 하향 조정
 
   try {
-    console.log(`🎨 [Nano Banana] 이미지 생성 시도 중... (${retryCount + 1}/${MAX_RETRIES + 1})`);
+    console.log(`🎨 [Stability AI] 이미지 생성 시도 중... (${retryCount + 1}/${MAX_RETRIES + 1})`);
 
-    // 모델명: gemini-3-flash-image (Nano Banana 2 정식 명칭 확인 필요)
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const formData = new FormData();
+    formData.append("prompt", prompt);
+    formData.append("model", STABILITY_MODEL);
+    formData.append("output_format", "png");
+    formData.append("aspect_ratio", "16:9");
 
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        // @ts-ignore: 최신 SDK에서 지원하는 이미지 전용 설정
-        responseModalities: ["IMAGE"],
+    const response = await fetch("https://api.stability.ai/v2beta/stable-image/generate/sd3", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${STABILITY_API_KEY}`,
+        Accept: "application/json",
       },
+      body: formData,
     });
 
-    const response = await result.response;
-    const candidates = response.candidates;
-
-    if (candidates && candidates[0]?.content?.parts) {
-      const imagePart = candidates[0].content.parts.find((part) => part.inlineData);
-      if (imagePart?.inlineData) {
-        const { mimeType, data } = imagePart.inlineData;
-        console.log(`✅ [Nano Banana] 생성 성공! (${mimeType})`);
-        return `data:${mimeType};base64,${data}`;
+    if (!response.ok) {
+      if (response.status === 402 || response.status === 403) {
+        throw new Error("QUOTA_EXCEEDED_STOP");
       }
+      const errorText = await response.text();
+      throw new Error(`STATUS_${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    if (data.image) {
+      console.log(`✅ [Stability AI] 생성 성공!`);
+      return `data:image/png;base64,${data.image}`;
     }
 
     throw new Error("IMAGE_DATA_NOT_FOUND");
 
   } catch (err: any) {
     const errorMsg = err.message || "";
-    const statusCode = err.status || 0;
 
-    console.error(`❌ [Nano Banana Error]: ${errorMsg}`);
+    console.error(`❌ [Stability AI Error]: ${errorMsg}`);
 
-    // [치명적 에러 판별] 429(한도 초과), 401/403(인증 오류)는 재시도하지 않음
-    const isQuotaExceeded = statusCode === 429 || errorMsg.includes("spending cap") || errorMsg.includes("quota");
-    const isAuthError = statusCode === 401 || statusCode === 403;
-
-    if (isQuotaExceeded) {
-      console.error("🚨 [STOP] 구글 클라우드 결제 한도 초과! 즉시 중단합니다.");
+    if (errorMsg === "QUOTA_EXCEEDED_STOP") {
+      console.error("🚨 [STOP] API 키 인증 실패 또는 잔액 부족! 즉시 중단합니다.");
       throw new Error("QUOTA_EXCEEDED_STOP"); // 상위 함수까지 전파하여 루프 방지
-    }
-
-    if (isAuthError) {
-      throw new Error("API_KEY_INVALID");
     }
 
     // 일반적인 네트워크 오류 시에만 재시도
@@ -67,7 +65,7 @@ async function generateNanoBananaImage(prompt: string, retryCount = 0): Promise<
       const waitTime = Math.pow(2, retryCount + 1) * 2000;
       console.log(`⏳ ${waitTime / 1000}초 후 재시도...`);
       await sleep(waitTime);
-      return generateNanoBananaImage(prompt, retryCount + 1);
+      return generateStabilityImage(prompt, retryCount + 1);
     }
 
     throw new Error(`IMAGE_GEN_FAILED: ${errorMsg}`);
@@ -95,11 +93,11 @@ export async function generateDetailPage(formData: FormData) {
 
     if (uploadError) throw new Error(`STORAGE_ERROR: ${uploadError.message}`);
 
-    // 2. Nano Banana 이미지 생성 (비용이 발생하는 구간)
+    // 2. Stability AI 이미지 생성 (비용이 발생하는 구간)
     console.log("🚀 Step 2: AI 이미지 생성 시작");
     const imagePrompt = `High-end professional e-commerce product photography for "${productName}". Target: ${targetAudience}. Features: ${features}. Style: Clean studio lighting, 8k resolution, photorealistic, 1200px wide.`;
 
-    const aiImageUrl = await generateNanoBananaImage(imagePrompt);
+    const aiImageUrl = await generateStabilityImage(imagePrompt);
 
     // 3. GPT-4o 카피라이팅 (Mock 또는 실제 호출)
     console.log("✍️ Step 3: 카피라이팅 생성 시작");

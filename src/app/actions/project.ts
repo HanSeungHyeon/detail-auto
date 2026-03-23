@@ -1,21 +1,19 @@
 "use server";
 
-import { GoogleGenAI } from "@google/genai";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
 import { generateLongFormContent } from "@/utils/gemini";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const NANO_BANANA_MODEL = "gemini-2.0-flash-exp";
+const STABILITY_API_KEY = process.env.STABILITY_API_KEY || "";
+const STABILITY_MODEL = "sd3.5-large-turbo"; // "sd3.5-large" 또는 "sd3.5-large-turbo"
 
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Nano Banana 이미지 생성
+ * Stability AI (Stable Diffusion 3.5) 이미지 생성
  * 최대 3회 재시도, 지수 백오프 적용
  */
-async function generateNanoBananaImage(
+async function generateStabilityImage(
   prompt: string,
   retryCount = 0
 ): Promise<string> {
@@ -23,36 +21,53 @@ async function generateNanoBananaImage(
 
   try {
     console.log(
-      `🎨 [${retryCount + 1}/${MAX_RETRIES + 1}] Nano Banana 이미지 생성 중...`
+      `🎨 [${retryCount + 1}/${MAX_RETRIES + 1}] Stability AI 이미지 생성 중...`
     );
 
-    const response = await ai.models.generateContent({
-      model: NANO_BANANA_MODEL,
-      contents: prompt,
-      config: {
-        responseModalities: ["IMAGE", "TEXT"],
+    const formData = new FormData();
+    formData.append("prompt", prompt);
+    formData.append("model", STABILITY_MODEL);
+    formData.append("output_format", "png");
+    formData.append("aspect_ratio", "16:9");
+
+    const response = await fetch("https://api.stability.ai/v2beta/stable-image/generate/sd3", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${STABILITY_API_KEY}`,
+        Accept: "application/json",
       },
+      body: formData,
     });
 
-    const parts = response?.candidates?.[0]?.content?.parts ?? [];
-    for (const part of parts) {
-      if (part?.inlineData?.data) {
-        const mimeType = part.inlineData.mimeType || "image/png";
-        console.log(`✅ 이미지 생성 성공 (${mimeType})`);
-        return `data:${mimeType};base64,${part.inlineData.data}`;
+    if (!response.ok) {
+      if (response.status === 402 || response.status === 403) {
+        throw new Error("API 키가 유효하지 않거나 잔액이 부족합니다. (QUOTA_EXCEEDED)");
       }
+      const errorText = await response.text();
+      throw new Error(`${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    if (data.image) {
+      console.log(`✅ 이미지 생성 성공`);
+      return `data:image/png;base64,${data.image}`;
     }
 
     throw new Error("응답에 이미지 데이터 없음");
   } catch (err: any) {
     const msg = err?.message || "Unknown error";
-    console.error(`❌ Nano Banana 에러: ${msg}`);
+    console.error(`❌ Stability AI 에러: ${msg}`);
+
+    if (msg.includes("QUOTA_EXCEEDED")) {
+      throw err;
+    }
 
     if (retryCount < MAX_RETRIES) {
       const backoffMs = Math.pow(2, retryCount + 1) * 2000;
       console.log(`⏳ ${backoffMs / 1000}초 후 재시도...`);
       await sleep(backoffMs);
-      return generateNanoBananaImage(prompt, retryCount + 1);
+      return generateStabilityImage(prompt, retryCount + 1);
     }
 
     throw new Error(`이미지 생성 실패 (${MAX_RETRIES + 1}회 시도): ${msg}`);
@@ -60,7 +75,7 @@ async function generateNanoBananaImage(
 }
 
 /**
- * 모든 섹션 이미지를 Nano Banana로 순차 생성
+ * 모든 섹션 이미지를 Stability AI로 순차 생성
  */
 async function generateAllSectionImages(
   sections: Record<string, any>
@@ -82,7 +97,7 @@ async function generateAllSectionImages(
     }
 
     try {
-      sections[key].image = await generateNanoBananaImage(prompt);
+      sections[key].image = await generateStabilityImage(prompt);
     } catch (err: any) {
       console.error(`⚠️ "${key}" 실패: ${err.message}`);
       sections[key].image = "";
