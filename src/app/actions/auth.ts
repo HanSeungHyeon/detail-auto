@@ -57,19 +57,21 @@ export async function verifySession() {
   }
 
   // Fetch profiles table to get credits
-  const { data: profile } = await supabase
+  const { data: profileData } = await supabase
     .from("profiles")
-    .select("credits")
+    .select("*")
     .eq("id", user.id)
     .single()
 
-  return { 
-    user: { 
-      id: user.id, 
-      email: user.email, 
-      credits: profile?.credits || 0 
-    }, 
-    isAuthenticated: true 
+  const profile = profileData as { credits: number | null } | null
+
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      credits: profile?.credits ?? 0
+    },
+    isAuthenticated: true
   }
 }
 
